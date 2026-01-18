@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -35,6 +36,7 @@ type Module struct {
 // Options configures dependency discovery.
 type Options struct {
 	Filter       string
+	FilterRegex  *regexp.Regexp
 	IncludeAll   bool
 	CooldownDays int
 }
@@ -73,7 +75,11 @@ func AnnotateAndFilter(modules []Module, idx gomod.RequireIndex, opts Options, n
 			continue
 		}
 		if opts.Filter != "" {
-			if !strings.Contains(m.Path, opts.Filter) {
+			match := strings.Contains(m.Path, opts.Filter)
+			if !match && opts.FilterRegex != nil {
+				match = opts.FilterRegex.MatchString(m.Path)
+			}
+			if !match {
 				continue
 			}
 		}
@@ -105,6 +111,14 @@ func GetUpdatesFrom(goModPath string, opts Options) ([]Module, error) {
 	idx, err := gomod.ReadRequireIndex(goModPath)
 	if err != nil {
 		return nil, err
+	}
+
+	if opts.Filter != "" && opts.FilterRegex == nil {
+		compiled, err := regexp.Compile(opts.Filter)
+		if err != nil {
+			return nil, fmt.Errorf("invalid filter pattern: %w", err)
+		}
+		opts.FilterRegex = compiled
 	}
 
 	output, err := goListAllModulesOutput()
