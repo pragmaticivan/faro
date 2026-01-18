@@ -1,6 +1,6 @@
 ## go-check-updates (gcu)
 
-`gcu` is a Go-first alternative to `npm-check-updates`. Run it in a module root to see which dependencies can be upgraded, choose the ones you want, and let it rewrite `go.mod`/`go.sum` for you.
+`gcu` is a Go-first dependency management utility. Run it in a module root to see which dependencies can be upgraded, choose the ones you want, and let it rewrite `go.mod`/`go.sum` for you.
 
 ![gcu preview](images/gcu-preview.png)
 
@@ -70,3 +70,7 @@ go test ./...
 ## License
 
 Licensed under the Apache License 2.0. See [LICENSE](LICENSE).
+
+## Inspiration
+
+* `npm-check-updates`
