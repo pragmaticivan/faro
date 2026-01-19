@@ -26,6 +26,11 @@ tasks:
     cmds:
       - go test {{.TEST_OPTIONS}} -failfast -race -coverpkg=./... -covermode=atomic -coverprofile=coverage.txt {{.SOURCE_FILES}} -run {{.TEST_PATTERN}} -timeout=5m
 
+  lint:
+    desc: Run lint
+    cmds:
+      - golangci-lint run
+
   ci:
     desc: Run all CI steps
     cmds:
