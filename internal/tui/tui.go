@@ -103,11 +103,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor++
 			}
 		case " ", "space":
-			_, ok := m.selected[m.cursor]
-			if ok {
-				delete(m.selected, m.cursor)
-			} else {
-				m.selected[m.cursor] = struct{}{}
+			if m.cursor >= 0 && m.cursor < len(m.choices) {
+				_, ok := m.selected[m.cursor]
+				if ok {
+					delete(m.selected, m.cursor)
+				} else {
+					m.selected[m.cursor] = struct{}{}
+				}
 			}
 		case "enter":
 			return m, tea.Quit
@@ -202,7 +204,9 @@ func StartInteractiveGroupedWithOptions(direct, indirect, transitive []scanner.M
 		// Collect selected modules
 		var toUpdate []scanner.Module
 		for i := range finalModel.selected {
-			toUpdate = append(toUpdate, finalModel.choices[i])
+			if i >= 0 && i < len(finalModel.choices) {
+				toUpdate = append(toUpdate, finalModel.choices[i])
+			}
 		}
 
 		if len(toUpdate) > 0 {
