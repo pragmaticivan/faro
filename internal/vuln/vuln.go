@@ -30,12 +30,19 @@ type RealClient struct {
 	cache      map[string]SeverityCounts
 	cacheMu    sync.RWMutex
 	httpClient *http.Client
+	ecosystem  string // "Go", "npm", "PyPI", etc.
 }
 
-// NewClient creates a new vulnerability client
+// NewClient creates a new vulnerability client for Go ecosystem
 func NewClient() Client {
+	return NewClientForEcosystem("Go")
+}
+
+// NewClientForEcosystem creates a new vulnerability client for a specific ecosystem
+func NewClientForEcosystem(ecosystem string) Client {
 	return &RealClient{
-		cache: make(map[string]SeverityCounts),
+		cache:     make(map[string]SeverityCounts),
+		ecosystem: ecosystem,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -83,7 +90,7 @@ func (c *RealClient) CheckModule(ctx context.Context, modulePath, version string
 	// Prepare OSV API query
 	query := osvQuery{}
 	query.Package.Name = modulePath
-	query.Package.Ecosystem = "Go"
+	query.Package.Ecosystem = c.ecosystem
 	query.Version = version
 
 	jsonData, err := json.Marshal(query)

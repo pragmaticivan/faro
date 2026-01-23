@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pragmaticivan/go-check-updates/internal/scanner"
+	"github.com/pragmaticivan/faro/internal/scanner"
 )
 
 func TestParseFlag(t *testing.T) {
@@ -41,10 +41,10 @@ func TestParseRFC3339ish(t *testing.T) {
 }
 
 func TestGroupLabelAndSortKey(t *testing.T) {
-	mMajor := scanner.Module{Version: "v1.0.0", Update: &scanner.Module{Version: "v2.0.0"}}
-	mMinor := scanner.Module{Version: "v1.0.0", Update: &scanner.Module{Version: "v1.1.0"}}
-	mPatch := scanner.Module{Version: "v1.0.0", Update: &scanner.Module{Version: "v1.0.1"}}
-	mV0Minor := scanner.Module{Version: "v0.1.0", Update: &scanner.Module{Version: "v0.2.0"}}
+	mMajor := scanner.Module{Version: "v1.0.0", Update: &scanner.UpdateInfo{Version: "v2.0.0"}}
+	mMinor := scanner.Module{Version: "v1.0.0", Update: &scanner.UpdateInfo{Version: "v1.1.0"}}
+	mPatch := scanner.Module{Version: "v1.0.0", Update: &scanner.UpdateInfo{Version: "v1.0.1"}}
+	mV0Minor := scanner.Module{Version: "v0.1.0", Update: &scanner.UpdateInfo{Version: "v0.2.0"}}
 
 	if GroupLabel(mMajor) != "Major" || GroupSortKey(mMajor) != 0 {
 		t.Fatalf("unexpected major label/sort")

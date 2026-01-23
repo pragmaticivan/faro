@@ -7,7 +7,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
-	"github.com/pragmaticivan/go-check-updates/internal/scanner"
+	"github.com/pragmaticivan/faro/internal/scanner"
 )
 
 func init() {

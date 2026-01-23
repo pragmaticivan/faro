@@ -1,85 +1,79 @@
-## go-check-updates (gcu)
+## faro
 
-`gcu` is a Go-first dependency management utility. Run it in a module root to see which dependencies can be upgraded, choose the ones you want, and let it rewrite `go.mod`/`go.sum` for you.
+`faro` is a unified dependency management utility for Go, Node.js, and Python. Run it in a project root to see which dependencies can be upgraded, choose the ones you want interactively, and let it update your lockfiles automatically.
 
-![gcu preview](images/gcu-preview.png)
+![faro preview](images/faro-preview.png)
 
 ## Highlights
 
-- Detect direct and optional transitive (`--all`) updates with a single command.
-- Interactive Bubble Tea UI for selective upgrades (`-i`).
-- Script-friendly `--format` options (`lines`, `group`, `time`).
-- Cooldown window to skip freshly published versions (`--cooldown 14`).
-- Works great in CI or locally; plain `gcu` is a dry run, `-u` applies changes.
+- **Multi-language support**: Works with Go, Node.js (npm, yarn, pnpm), and Python (pip, poetry, uv).
+- **Interactive UI**: Bubble Tea-powered terminal interface for selective upgrades (`-i`).
+- **Safety checks**: Cooldown window to skip freshly published versions (`--cooldown 14`).
+- **Script-friendly**: JSON output or custom line formatting for CI/CD pipelines.
+- **Vulnerability scanning**: Check for security advisories via OSV integration (`-v`).
+
+## Supported Package Managers
+
+| Ecosystem | Detected via | Notes |
+| :--- | :--- | :--- |
+| **Go** | `go.mod` | Uses `go list` and `go get` |
+| **npm** | `package-lock.json` | Uses `npm outdated` and `npm install` |
+| **Yarn** | `yarn.lock` | Uses `yarn outdated` and `yarn add` |
+| **pnpm** | `pnpm-lock.yaml` | Uses `pnpm outdated` and `pnpm update` |
+| **Pip** | `requirements.txt` | Uses generic PyPI scanning |
+| **Poetry** | `poetry.lock` | Uses `poetry show` and `poetry add` |
+| **uv** | `uv.lock` | Uses `uv` commands |
 
 ## Install
 
 ```bash
-go install github.com/pragmaticivan/go-check-updates/cmd/gcu@latest
+go install github.com/pragmaticivan/faro/cmd/faro@latest
 ```
 
 From source:
 
 ```bash
-git clone https://github.com/pragmaticivan/go-check-updates.git
-cd go-check-updates
-go build -o gcu ./cmd/gcu
+git clone https://github.com/pragmaticivan/faro.git
+cd faro
+go build -o faro ./cmd/faro
 ```
 
 ## Quick start
 
 | Task | Command | Notes |
 | --- | --- | --- |
-| Dry run (recommended) | `gcu` | Lists direct updates grouped by direct/indirect |
-| Upgrade everything | `gcu -u` | Applies updates, then runs `go mod tidy` |
-| Interactive picker | `gcu -i` | Use space to toggle, enter to confirm |
-| Check vulnerabilities | `gcu -v` | Shows vulnerability counts for current and updated versions |
-| Filter names | `gcu --filter charm` | Accepts substring or regex via Go's `regexp` |
-| Include transitive deps | `gcu --all` | Adds modules pulled in indirectly |
-| Skip fresh releases | `gcu --cooldown 30` | Ignores versions published in last N days |
+| Dry run (recommended) | `faro` | Lists updates for the detected manager |
+| Upgrade everything | `faro -u` | Applies all updates to config/lockfiles |
+| Interactive picker | `faro -i` | Use space to select, enter to update |
+| Check vulnerabilities | `faro -v` | Shows vulnerability counts |
+| Specific manager | `faro --manager npm` | Override auto-detection |
+| Filter packages | `faro --filter react` | Regex filter for package names |
+| Include transitive | `faro --all` | Adds indirect/transitive dependencies |
 
 ### Output formats
 
 ```bash
 # Pipe-friendly
-gcu --format lines
+faro --format lines
 
-# Group major/minor/patch and show publish date
-gcu --format group,time
+# Group by category (e.g. dev vs prod) and show publish dates
+faro --format group,time
 ```
-
-Combine formats with commas to mix behaviors.
-
-## Typical workflow
-
-1. Run `gcu` to review upcoming upgrades.
-2. Re-run with `-i` or `-u` depending on how selective you need to be.
-3. Commit the updated `go.mod`/`go.sum` and run `go test ./...` (the GitHub Actions workflow does the same check).
 
 ## How it works
 
-1. `gcu` shells out to `go list -m -u -json` to discover available versions.
-2. When upgrading, it executes `go get module@version` for each selection.
-3. A final `go mod tidy` keeps the module graph consistent.
+1. `faro` **auto-detects** your package manager by looking for lockfiles (e.g., `go.mod`, `package-lock.json`, `poetry.lock`).
+2. It **scans** for updates using the native tool's CLI (e.g., `npm outdated --json`) or direct registry queries.
+3. When upgrading, it runs the native installation command (e.g., `go get`, `npm install`, `poetry add`) to ensure lockfiles remain consistent.
 
 ### Vulnerability scanning
 
-When using the `-v` / `--vulnerabilities` flag, `gcu` queries the [OSV (Open Source Vulnerabilities) API](https://osv.dev) to check for known security issues in your dependencies.
-
-For each module with available updates, it:
-1. Checks the current version for vulnerabilities
-2. Checks the update version for vulnerabilities
-3. Shows a comparison with color-coded severity levels:
-   - `L (n)` - Low severity
-   - `M (n)` - Medium severity (yellow)
-   - `H (n)` - High severity (orange)
-   - `C (n)` - Critical severity (red)
+When using `-v` / `--vulnerabilities`, `faro` queries the [OSV (Open Source Vulnerabilities) API](https://osv.dev) to check for known security issues.
 
 Example output:
 ```
 gopkg.in/yaml.v3   v3.0.0  →  v3.0.1 [H (1)] → ✓ (fixes 1)
 ```
-
 This indicates the current version has 1 HIGH severity vulnerability that will be fixed by upgrading.
 
 ## Development

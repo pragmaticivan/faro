@@ -1,4 +1,4 @@
-module github.com/pragmaticivan/go-check-updates
+module github.com/pragmaticivan/faro
 
 go 1.25
 

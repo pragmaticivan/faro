@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/pragmaticivan/go-check-updates/internal/vuln"
+	"github.com/pragmaticivan/faro/internal/vuln"
 )
 
 func TestNewClient(t *testing.T) {

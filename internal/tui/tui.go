@@ -9,10 +9,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/pragmaticivan/go-check-updates/internal/format"
-	"github.com/pragmaticivan/go-check-updates/internal/scanner"
-	"github.com/pragmaticivan/go-check-updates/internal/style"
-	"github.com/pragmaticivan/go-check-updates/internal/updater"
+	"github.com/pragmaticivan/faro/internal/format"
+	"github.com/pragmaticivan/faro/internal/scanner"
+	"github.com/pragmaticivan/faro/internal/style"
+	"github.com/pragmaticivan/faro/internal/updater"
 )
 
 var runProgram = func(m tea.Model) (tea.Model, error) {
@@ -20,12 +20,14 @@ var runProgram = func(m tea.Model) (tea.Model, error) {
 	return p.Run()
 }
 
-var updatePackages = updater.UpdatePackages
-
 // Options configures rendering and grouping behavior for the interactive TUI.
 type Options struct {
-	FormatGroup bool
-	FormatTime  bool
+	FormatGroup     bool
+	FormatTime      bool
+	Updater         updater.Updater // The updater instance to use for applying updates
+	DirectLabel     string          // Label for direct dependencies
+	IndirectLabel   string          // Label for indirect/dev dependencies
+	TransitiveLabel string          // Label for transitive dependencies
 }
 
 type model struct {
@@ -132,8 +134,12 @@ func (m model) View() string {
 	// Find longest path for padding
 	maxPathLen := 0
 	for _, c := range m.choices {
-		if len(c.Path) > maxPathLen {
-			maxPathLen = len(c.Path)
+		name := c.Name
+		if name == "" {
+			name = c.Path
+		}
+		if len(name) > maxPathLen {
+			maxPathLen = len(name)
 		}
 	}
 
@@ -141,15 +147,27 @@ func (m model) View() string {
 	for i, choice := range m.choices {
 		// Section headings (do not affect cursor/selection indices)
 		if i == 0 {
-			s += heading.Render("Direct dependencies (go.mod)") + "\n"
+			label := m.opts.DirectLabel
+			if label == "" {
+				label = "Direct dependencies"
+			}
+			s += heading.Render(label) + "\n"
 			prevGroup = ""
 		}
 		if i == m.directEnd && i < len(m.choices) {
-			s += "\n" + headingMuted.Render("Indirect dependencies (go.mod // indirect)") + "\n"
+			label := m.opts.IndirectLabel
+			if label == "" {
+				label = "Indirect dependencies"
+			}
+			s += "\n" + headingMuted.Render(label) + "\n"
 			prevGroup = ""
 		}
 		if m.transitiveOn && i == m.indirectEnd && i < len(m.choices) {
-			s += "\n" + headingMuted.Render("Transitive (not in go.mod)") + "\n"
+			label := m.opts.TransitiveLabel
+			if label == "" {
+				label = "Transitive"
+			}
+			s += "\n" + headingMuted.Render(label) + "\n"
 			prevGroup = ""
 		}
 
@@ -176,7 +194,11 @@ func (m model) View() string {
 		}
 
 		// Row content
-		row := style.FormatUpdate(choice.Path, choice.Version, choice.Update.Version, maxPathLen)
+		name := choice.Name
+		if name == "" {
+			name = choice.Path
+		}
+		row := style.FormatUpdate(name, choice.Version, choice.Update.Version, maxPathLen)
 		if m.opts.FormatTime && choice.Update != nil {
 			pt := format.PublishTime(choice.Update.Time, time.Now())
 			if pt != "" {
@@ -210,7 +232,11 @@ func StartInteractiveGroupedWithOptions(direct, indirect, transitive []scanner.M
 		}
 
 		if len(toUpdate) > 0 {
-			if err := updatePackages(toUpdate); err != nil {
+			if finalModel.opts.Updater == nil {
+				fmt.Println("Error: no updater configured")
+				return
+			}
+			if err := finalModel.opts.Updater.UpdatePackages(toUpdate); err != nil {
 				fmt.Printf("Error updating: %v\n", err)
 			} else {
 				fmt.Println("Updates complete!")

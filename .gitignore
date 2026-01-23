@@ -1,4 +1,6 @@
 # Added by goreleaser init:
 dist/
 .task/
-gcu
+faro
+!cmd/faro
+brain

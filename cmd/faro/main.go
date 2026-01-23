@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/pragmaticivan/go-check-updates/cmd"
+	"github.com/pragmaticivan/faro/cmd"
 )
 
 func main() {

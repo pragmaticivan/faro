@@ -11,11 +11,11 @@ tasks:
   build:
     desc: Build the binary
     sources:
-      - ./cmd/gcu/**
+      - ./cmd/faro/**
     generates:
-      - ./gcu
+      - ./faro
     cmds:
-      - go build ./cmd/gcu
+      - go build ./cmd/faro
 
   test:
     desc: Run unit tests

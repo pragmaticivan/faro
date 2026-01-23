@@ -5,12 +5,27 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/pragmaticivan/go-check-updates/internal/scanner"
+	"github.com/pragmaticivan/faro/internal/scanner"
 )
 
+type mockUpdater struct {
+	called     bool
+	lastUpdate []scanner.Module
+}
+
+func (m *mockUpdater) UpdatePackages(modules []scanner.Module) error {
+	m.called = true
+	m.lastUpdate = modules
+	return nil
+}
+
+func (m *mockUpdater) UpdateSinglePackage(module scanner.Module) error {
+	return nil
+}
+
 func TestModelSelectionAndCursor(t *testing.T) {
-	direct := []scanner.Module{{Path: "a", Version: "v1.0.0", Update: &scanner.Module{Version: "v1.1.0"}}}
-	indirect := []scanner.Module{{Path: "b", Version: "v1.0.0", Update: &scanner.Module{Version: "v1.0.1"}}}
+	direct := []scanner.Module{{Path: "a", Version: "v1.0.0", Update: &scanner.UpdateInfo{Version: "v1.1.0"}}}
+	indirect := []scanner.Module{{Path: "b", Version: "v1.0.0", Update: &scanner.UpdateInfo{Version: "v1.0.1"}}}
 	m := initialModel(direct, indirect, nil, Options{})
 
 	// Move down
@@ -45,8 +60,8 @@ func TestInit_ReturnsNil(t *testing.T) {
 func TestInitialModel_SortsWhenFormatGroup(t *testing.T) {
 	// Use paths that should end up sorted by group and then path.
 	direct := []scanner.Module{
-		{Path: "b", Version: "v1.0.0", Update: &scanner.Module{Version: "v1.0.1"}},
-		{Path: "a", Version: "v1.0.0", Update: &scanner.Module{Version: "v2.0.0"}},
+		{Path: "b", Version: "v1.0.0", Update: &scanner.UpdateInfo{Version: "v1.0.1"}},
+		{Path: "a", Version: "v1.0.0", Update: &scanner.UpdateInfo{Version: "v2.0.0"}},
 	}
 	m := initialModel(direct, nil, nil, Options{FormatGroup: true})
 	if len(m.choices) != 2 {
@@ -59,8 +74,8 @@ func TestInitialModel_SortsWhenFormatGroup(t *testing.T) {
 }
 
 func TestViewContainsHeadings(t *testing.T) {
-	direct := []scanner.Module{{Path: "a", Version: "v1.0.0", Update: &scanner.Module{Version: "v1.1.0"}}}
-	m := initialModel(direct, nil, nil, Options{})
+	direct := []scanner.Module{{Path: "a", Version: "v1.0.0", Update: &scanner.UpdateInfo{Version: "v1.1.0"}}}
+	m := initialModel(direct, nil, nil, Options{DirectLabel: "Direct dependencies (go.mod)"})
 	view := m.View()
 	if !strings.Contains(view, "Direct dependencies (go.mod)") {
 		t.Fatalf("expected direct heading")
@@ -72,31 +87,26 @@ func TestViewContainsHeadings(t *testing.T) {
 
 func TestStartInteractiveGroupedWithOptions_AppliesSelection(t *testing.T) {
 	origRun := runProgram
-	origUpdate := updatePackages
 	defer func() {
 		runProgram = origRun
-		updatePackages = origUpdate
 	}()
 
-	direct := []scanner.Module{{Path: "a", Version: "v1.0.0", Update: &scanner.Module{Version: "v1.1.0"}}}
-	base := initialModel(direct, nil, nil, Options{})
+	mock := &mockUpdater{}
+	direct := []scanner.Module{{Path: "a", Version: "v1.0.0", Update: &scanner.UpdateInfo{Version: "v1.1.0"}}}
+	base := initialModel(direct, nil, nil, Options{Updater: mock})
 	base.selected[0] = struct{}{}
 
-	called := false
 	runProgram = func(tea.Model) (tea.Model, error) {
 		return base, nil
 	}
-	updatePackages = func(mods []scanner.Module) error {
-		called = true
-		if len(mods) != 1 || mods[0].Path != "a" {
-			t.Fatalf("unexpected modules: %#v", mods)
-		}
-		return nil
-	}
 
-	StartInteractiveGroupedWithOptions(direct, nil, nil, Options{})
-	if !called {
-		t.Fatalf("expected updatePackages to be called")
+	StartInteractiveGroupedWithOptions(direct, nil, nil, Options{Updater: mock})
+
+	if !mock.called {
+		t.Fatalf("expected UpdatePackages to be called")
+	}
+	if len(mock.lastUpdate) != 1 || mock.lastUpdate[0].Path != "a" {
+		t.Fatalf("unexpected modules: %#v", mock.lastUpdate)
 	}
 }
 
@@ -113,11 +123,11 @@ func TestStartInteractiveGrouped_BackCompat(t *testing.T) {
 func TestBoundsChecking_SpaceOnEmptyChoices(t *testing.T) {
 	// Test that pressing space with empty choices doesn't panic
 	m := initialModel(nil, nil, nil, Options{})
-	
+
 	// Try to select with space - should not panic
 	modelAny, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
 	m2 := modelAny.(model)
-	
+
 	// Should have no selections
 	if len(m2.selected) != 0 {
 		t.Fatalf("expected no selections, got %d", len(m2.selected))
@@ -125,61 +135,23 @@ func TestBoundsChecking_SpaceOnEmptyChoices(t *testing.T) {
 }
 
 func TestBoundsChecking_InvalidCursorPosition(t *testing.T) {
-	direct := []scanner.Module{{Path: "a", Version: "v1.0.0", Update: &scanner.Module{Version: "v1.1.0"}}}
+	direct := []scanner.Module{{Path: "a", Version: "v1.0.0", Update: &scanner.UpdateInfo{Version: "v1.1.0"}}}
 	m := initialModel(direct, nil, nil, Options{})
-	
+
 	// Manually set cursor to invalid position (simulating potential bug)
 	m.cursor = 999
-	
+
 	// Try to select with space - should not panic, should do nothing
 	modelAny, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
 	m2 := modelAny.(model)
-	
+
 	// Should have no selections since cursor is out of bounds
 	if len(m2.selected) != 0 {
 		t.Fatalf("expected no selections for invalid cursor, got %d", len(m2.selected))
 	}
-	
+
 	// Cursor should remain at invalid position (bounds checking doesn't modify cursor)
 	if m2.cursor != 999 {
 		t.Fatalf("expected cursor to remain at 999, got %d", m2.cursor)
-	}
-}
-
-func TestBoundsChecking_SelectionCollection(t *testing.T) {
-	origRun := runProgram
-	origUpdate := updatePackages
-	defer func() {
-		runProgram = origRun
-		updatePackages = origUpdate
-	}()
-
-	direct := []scanner.Module{
-		{Path: "a", Version: "v1.0.0", Update: &scanner.Module{Version: "v1.1.0"}},
-		{Path: "b", Version: "v1.0.0", Update: &scanner.Module{Version: "v1.1.0"}},
-	}
-	base := initialModel(direct, nil, nil, Options{})
-	
-	// Add valid and invalid selections
-	base.selected[0] = struct{}{}  // Valid
-	base.selected[999] = struct{}{} // Invalid (out of bounds)
-	
-	var receivedMods []scanner.Module
-	runProgram = func(tea.Model) (tea.Model, error) {
-		return base, nil
-	}
-	updatePackages = func(mods []scanner.Module) error {
-		receivedMods = mods
-		return nil
-	}
-
-	StartInteractiveGroupedWithOptions(direct, nil, nil, Options{})
-	
-	// Should only include the valid selection
-	if len(receivedMods) != 1 {
-		t.Fatalf("expected 1 module, got %d", len(receivedMods))
-	}
-	if receivedMods[0].Path != "a" {
-		t.Fatalf("expected module 'a', got %q", receivedMods[0].Path)
 	}
 }

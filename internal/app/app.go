@@ -4,15 +4,19 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"sort"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/pragmaticivan/go-check-updates/internal/format"
-	"github.com/pragmaticivan/go-check-updates/internal/scanner"
-	"github.com/pragmaticivan/go-check-updates/internal/style"
-	"github.com/pragmaticivan/go-check-updates/internal/tui"
-	"github.com/pragmaticivan/go-check-updates/internal/vuln"
+	"github.com/pragmaticivan/faro/internal/detector"
+	"github.com/pragmaticivan/faro/internal/factory"
+	"github.com/pragmaticivan/faro/internal/format"
+	"github.com/pragmaticivan/faro/internal/scanner"
+	"github.com/pragmaticivan/faro/internal/style"
+	"github.com/pragmaticivan/faro/internal/tui"
+	"github.com/pragmaticivan/faro/internal/updater"
+	"github.com/pragmaticivan/faro/internal/vuln"
 )
 
 type RunOptions struct {
@@ -23,22 +27,29 @@ type RunOptions struct {
 	Cooldown            int
 	FormatFlag          string
 	ShowVulnerabilities bool
+	Manager             string // Package manager override
 }
 
 type Deps struct {
 	Out              io.Writer
 	Now              func() time.Time
-	GetUpdates       func(scanner.Options) ([]scanner.Module, error)
-	UpdatePackages   func([]scanner.Module) error
 	StartInteractive func(direct, indirect, transitive []scanner.Module, opts tui.Options)
+	Scanner          scanner.Scanner // Optional: verify overrides for testing
+	Updater          updater.Updater // Optional: verify overrides for testing
 }
 
 // checkVulnerabilities checks for vulnerabilities in current and update versions
 func checkVulnerabilities(ctx context.Context, modules []scanner.Module, vulnClient vuln.Client) {
 	for i := range modules {
 		if modules[i].Update != nil {
+			// Use Name field, fallback to Path for backward compatibility
+			pkgName := modules[i].Name
+			if pkgName == "" {
+				pkgName = modules[i].Path
+			}
+
 			// Check current version
-			if currentCounts, err := vulnClient.CheckModule(ctx, modules[i].Path, modules[i].Version); err == nil {
+			if currentCounts, err := vulnClient.CheckModule(ctx, pkgName, modules[i].Version); err == nil {
 				modules[i].VulnCurrent = scanner.VulnInfo{
 					Low:      currentCounts.Low,
 					Medium:   currentCounts.Medium,
@@ -49,7 +60,7 @@ func checkVulnerabilities(ctx context.Context, modules []scanner.Module, vulnCli
 			}
 
 			// Check update version
-			if updateCounts, err := vulnClient.CheckModule(ctx, modules[i].Path, modules[i].Update.Version); err == nil {
+			if updateCounts, err := vulnClient.CheckModule(ctx, pkgName, modules[i].Update.Version); err == nil {
 				modules[i].VulnUpdate = scanner.VulnInfo{
 					Low:      updateCounts.Low,
 					Medium:   updateCounts.Medium,
@@ -65,14 +76,26 @@ func checkVulnerabilities(ctx context.Context, modules []scanner.Module, vulnCli
 // groupModules splits modules into direct, indirect, and transitive categories
 func groupModules(modules []scanner.Module) (direct, indirect, transitive []scanner.Module) {
 	for _, m := range modules {
-		if m.FromGoMod {
-			if m.Indirect {
+		// Check if it's a direct dependency
+		if m.Direct {
+			// Further categorize based on dependency type
+			switch m.DependencyType {
+			case "devDependencies", "dev", "indirect":
 				indirect = append(indirect, m)
-			} else {
+			default:
 				direct = append(direct, m)
 			}
 		} else {
-			transitive = append(transitive, m)
+			// Handle legacy Go fields for backward compatibility
+			if m.FromGoMod {
+				if m.Indirect {
+					indirect = append(indirect, m)
+				} else {
+					direct = append(direct, m)
+				}
+			} else {
+				transitive = append(transitive, m)
+			}
 		}
 	}
 	return direct, indirect, transitive
@@ -90,7 +113,11 @@ func printLinesFormat(out io.Writer, direct, indirect, transitive []scanner.Modu
 		if m.Update == nil {
 			continue
 		}
-		_, _ = fmt.Fprintf(out, "%s@%s\n", m.Path, m.Update.Version)
+		name := m.Name
+		if name == "" {
+			name = m.Path // Fallback for backward compatibility
+		}
+		_, _ = fmt.Fprintf(out, "%s@%s\n", name, m.Update.Version)
 	}
 }
 
@@ -121,7 +148,11 @@ func printGroupedOutput(out io.Writer, group []scanner.Module, maxPathLen int, s
 	for _, label := range labels {
 		_, _ = fmt.Fprintf(out, "\n%s\n", dim.Render(label))
 		for _, m := range byLabel[label] {
-			line := " " + style.FormatUpdate(m.Path, m.Version, m.Update.Version, maxPathLen)
+			name := m.Name
+			if name == "" {
+				name = m.Path // Fallback
+			}
+			line := " " + style.FormatUpdate(name, m.Version, m.Update.Version, maxPathLen)
 			if showVulns && m.VulnCurrent.Total > 0 {
 				line += " " + formatVulnCounts(m.VulnCurrent, m.VulnUpdate)
 			}
@@ -141,7 +172,14 @@ func printSimpleOutput(out io.Writer, group []scanner.Module, maxPathLen int, sh
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 
 	for _, m := range group {
-		line := " " + style.FormatUpdateWithVulns(m.Path, m.Version, m.Update.Version, maxPathLen, m.VulnCurrent, m.VulnUpdate, showVulns)
+		name := m.Name
+		if name == "" {
+			name = m.Path // Fallback
+		}
+		line := " " + style.FormatUpdate(name, m.Version, m.Update.Version, maxPathLen)
+		if showVulns && m.VulnCurrent.Total > 0 {
+			line += " " + formatVulnCounts(m.VulnCurrent, m.VulnUpdate)
+		}
 		if showTime {
 			pt := format.PublishTime(m.Update.Time, now)
 			if pt != "" {
@@ -171,8 +209,12 @@ func calculateMaxPathLen(direct, indirect, transitive []scanner.Module) int {
 	maxPathLen := 0
 	for _, group := range [][]scanner.Module{direct, indirect, transitive} {
 		for _, m := range group {
-			if len(m.Path) > maxPathLen {
-				maxPathLen = len(m.Path)
+			name := m.Name
+			if name == "" {
+				name = m.Path
+			}
+			if len(name) > maxPathLen {
+				maxPathLen = len(name)
 			}
 		}
 	}
@@ -186,8 +228,38 @@ func Run(opts RunOptions, deps Deps) error {
 	if deps.Now == nil {
 		deps.Now = time.Now
 	}
-	if deps.GetUpdates == nil {
-		return fmt.Errorf("missing deps.GetUpdates")
+
+	// Detect or validate package manager
+	workDir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
+	}
+
+	var pm detector.PackageManager
+	if opts.Manager != "" {
+		// Use explicit manager
+		pm, err = detector.Validate(opts.Manager)
+		if err != nil {
+			return err
+		}
+	} else {
+		// Auto-detect
+		result, err := detector.DetectSingle(workDir)
+		if err != nil {
+			return fmt.Errorf("failed to detect package manager: %w\nSpecify one with --manager flag", err)
+		}
+		pm = result.Manager
+	}
+
+	// Create scanner and updater for the detected package manager
+	var pkgScanner scanner.Scanner
+	if deps.Scanner != nil {
+		pkgScanner = deps.Scanner
+	} else {
+		pkgScanner, err = factory.CreateScanner(pm, workDir)
+		if err != nil {
+			return err
+		}
 	}
 
 	formats, err := format.ParseFlag(opts.FormatFlag)
@@ -196,13 +268,16 @@ func Run(opts RunOptions, deps Deps) error {
 	}
 
 	if !formats.Lines {
+		_, _ = fmt.Fprintf(deps.Out, "Using package manager: %s\n", pm)
 		_, _ = fmt.Fprintln(deps.Out, "Checking for updates...")
 	}
 
-	modules, err := deps.GetUpdates(scanner.Options{
+	// Get updates using the package-specific scanner
+	modules, err := pkgScanner.GetUpdates(scanner.Options{
 		Filter:       opts.Filter,
 		IncludeAll:   opts.All,
 		CooldownDays: opts.Cooldown,
+		WorkDir:      workDir,
 	})
 	if err != nil {
 		return err
@@ -220,20 +295,37 @@ func Run(opts RunOptions, deps Deps) error {
 		if !formats.Lines {
 			_, _ = fmt.Fprintln(deps.Out, "Checking vulnerabilities...")
 		}
-		vulnClient := vuln.NewClient()
+		vulnClient := factory.CreateVulnClient(pm)
 		ctx := context.Background()
 		checkVulnerabilities(ctx, modules, vulnClient)
 	}
 
 	direct, indirect, transitive := groupModules(modules)
 
+	// Adapt group labels based on package manager
+	directLabel, indirectLabel, transitiveLabel := getGroupLabels(pm)
+
 	if opts.Interactive {
 		if deps.StartInteractive == nil {
 			return fmt.Errorf("missing deps.StartInteractive")
 		}
+		// Create updater for interactive mode
+		var updaterInstance updater.Updater
+		if deps.Updater != nil {
+			updaterInstance = deps.Updater
+		} else {
+			updaterInstance, err = factory.CreateUpdater(pm, workDir)
+			if err != nil {
+				return fmt.Errorf("failed to create updater: %w", err)
+			}
+		}
 		deps.StartInteractive(direct, indirect, transitive, tui.Options{
-			FormatGroup: formats.Group,
-			FormatTime:  formats.Time,
+			FormatGroup:     formats.Group,
+			FormatTime:      formats.Time,
+			Updater:         updaterInstance,
+			DirectLabel:     directLabel,
+			IndirectLabel:   indirectLabel,
+			TransitiveLabel: transitiveLabel,
 		})
 		return nil
 	}
@@ -248,10 +340,10 @@ func Run(opts RunOptions, deps Deps) error {
 	maxPathLen := calculateMaxPathLen(direct, indirect, transitive)
 	now := deps.Now()
 
-	printGroup(deps.Out, "Direct dependencies (go.mod)", direct, maxPathLen, formats.Group, opts.ShowVulnerabilities, formats.Time, now)
-	printGroup(deps.Out, "Indirect dependencies (go.mod // indirect)", indirect, maxPathLen, formats.Group, opts.ShowVulnerabilities, formats.Time, now)
+	printGroup(deps.Out, directLabel, direct, maxPathLen, formats.Group, opts.ShowVulnerabilities, formats.Time, now)
+	printGroup(deps.Out, indirectLabel, indirect, maxPathLen, formats.Group, opts.ShowVulnerabilities, formats.Time, now)
 	if opts.All {
-		printGroup(deps.Out, "Transitive (not in go.mod)", transitive, maxPathLen, formats.Group, opts.ShowVulnerabilities, formats.Time, now)
+		printGroup(deps.Out, transitiveLabel, transitive, maxPathLen, formats.Group, opts.ShowVulnerabilities, formats.Time, now)
 	}
 
 	packagesToUpdate := make([]scanner.Module, 0, len(direct)+len(indirect)+len(transitive))
@@ -262,11 +354,18 @@ func Run(opts RunOptions, deps Deps) error {
 	}
 
 	if opts.Upgrade {
-		if deps.UpdatePackages == nil {
-			return fmt.Errorf("missing deps.UpdatePackages")
+		var updaterInstance updater.Updater
+		if deps.Updater != nil {
+			updaterInstance = deps.Updater
+		} else {
+			updaterInstance, err = factory.CreateUpdater(pm, workDir)
+			if err != nil {
+				return err
+			}
 		}
+
 		_, _ = fmt.Fprintln(deps.Out, "\nUpgrading...")
-		if err := deps.UpdatePackages(packagesToUpdate); err != nil {
+		if err := updaterInstance.UpdatePackages(packagesToUpdate); err != nil {
 			return err
 		}
 		_, _ = fmt.Fprintln(deps.Out, "Done.")
@@ -275,6 +374,32 @@ func Run(opts RunOptions, deps Deps) error {
 
 	_, _ = fmt.Fprintln(deps.Out, "\nRun with -u to upgrade, or -i for interactive mode.")
 	return nil
+}
+
+// getGroupLabels returns appropriate group labels based on the package manager.
+func getGroupLabels(pm detector.PackageManager) (direct, indirect, transitive string) {
+	switch pm {
+	case detector.Go:
+		return "Direct dependencies (go.mod)",
+			"Indirect dependencies (go.mod // indirect)",
+			"Transitive (not in go.mod)"
+	case detector.Npm, detector.Yarn, detector.Pnpm:
+		return "Dependencies (package.json)",
+			"DevDependencies (package.json)",
+			"Transitive"
+	case detector.Pip:
+		return "Main dependencies (requirements.txt)",
+			"Transitive",
+			"Transitive"
+	case detector.Poetry, detector.Uv:
+		return "Main dependencies",
+			"Dev dependencies",
+			"Transitive"
+	default:
+		return "Direct dependencies",
+			"Indirect dependencies",
+			"Transitive"
+	}
 }
 
 // formatVulnCounts creates a compact string showing vulnerability transitions

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pragmaticivan/go-check-updates/internal/scanner"
-	"github.com/pragmaticivan/go-check-updates/internal/style"
+	"github.com/pragmaticivan/faro/internal/scanner"
+	"github.com/pragmaticivan/faro/internal/style"
 )
 
 type Options struct {

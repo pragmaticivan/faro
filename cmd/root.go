@@ -5,10 +5,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/pragmaticivan/go-check-updates/internal/app"
-	"github.com/pragmaticivan/go-check-updates/internal/scanner"
-	"github.com/pragmaticivan/go-check-updates/internal/tui"
-	"github.com/pragmaticivan/go-check-updates/internal/updater"
+	"github.com/pragmaticivan/faro/internal/app"
+	"github.com/pragmaticivan/faro/internal/scanner"
+	"github.com/pragmaticivan/faro/internal/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -21,15 +20,16 @@ var (
 	cooldownFlag        int
 	formatFlag          string
 	vulnerabilitiesFlag bool
+	managerFlag         string // Package manager override
 )
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "gcu",
-	Short: "Check for updates to Go dependencies",
-	Long: `go-check-updates (gcu) for Go modules.
+	Use:   "faro",
+	Short: "Check for updates to project dependencies",
+	Long: `faro is a unified dependency management utility.
 
-It allows you to list available updates, interactively select them, and upgrade your go.mod file.`,
+It allows you to list available updates, interactively select them, and upgrade your lockfiles for Go, Node.js, and Python projects.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		err := app.Run(
 			app.RunOptions{
@@ -40,12 +40,11 @@ It allows you to list available updates, interactively select them, and upgrade 
 				Cooldown:            cooldownFlag,
 				FormatFlag:          formatFlag,
 				ShowVulnerabilities: vulnerabilitiesFlag,
+				Manager:             managerFlag,
 			},
 			app.Deps{
-				Out:            os.Stdout,
-				Now:            time.Now,
-				GetUpdates:     scanner.GetUpdates,
-				UpdatePackages: updater.UpdatePackages,
+				Out: os.Stdout,
+				Now: time.Now,
 				StartInteractive: func(direct, indirect, transitive []scanner.Module, opts tui.Options) {
 					tui.StartInteractiveGroupedWithOptions(direct, indirect, transitive, opts)
 				},
@@ -74,4 +73,5 @@ func init() {
 	rootCmd.Flags().IntVarP(&cooldownFlag, "cooldown", "c", 0, "Minimum age (days) for an update to be considered")
 	rootCmd.Flags().StringVar(&formatFlag, "format", "", "Output format modifiers: group,lines,time (comma-delimited)")
 	rootCmd.Flags().BoolVarP(&vulnerabilitiesFlag, "vulnerabilities", "v", false, "Show vulnerability counts for current and updated versions")
+	rootCmd.Flags().StringVarP(&managerFlag, "manager", "m", "", "Package manager to use (go, npm, yarn, pnpm, pip, poetry, uv)")
 }

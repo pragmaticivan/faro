@@ -15,9 +15,9 @@ gomod:
   proxy: true
 
 builds:
-  - id: gcu
-    main: ./cmd/gcu
-    binary: gcu
+  - id: faro
+    main: ./cmd/faro
+    binary: faro
     env:
       - CGO_ENABLED=0
     goos:
