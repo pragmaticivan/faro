@@ -2,6 +2,7 @@
 package poetry
 
 import (
+	"bufio"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -51,15 +52,17 @@ func (s *Scanner) GetUpdates(opts scanner.Options) ([]scanner.Module, error) {
 			continue
 		}
 
-		// Parse line: "package-name version latest description"
+		// Parse line: "package-name (!) current latest [description]"
+		// The (!) indicator is present for all outdated packages
 		fields := strings.Fields(line)
-		if len(fields) < 3 {
+		if len(fields) < 4 {
 			continue
 		}
 
 		name := fields[0]
-		current := fields[1]
-		latest := fields[2]
+		// Skip the (!) indicator
+		current := fields[2]
+		latest := fields[3]
 
 		depInfo, isDirect := depIdx[name]
 		if !isDirect {
@@ -98,7 +101,7 @@ func (s *Scanner) GetUpdates(opts scanner.Options) ([]scanner.Module, error) {
 
 // GetDependencyIndex returns a map of Poetry package names to their dependency information.
 func (s *Scanner) GetDependencyIndex() (scanner.DependencyIndex, error) {
-	pyproject, err := s.readPyprojectToml()
+	deps, devDeps, err := s.readPyprojectToml()
 	if err != nil {
 		return nil, err
 	}
@@ -106,35 +109,78 @@ func (s *Scanner) GetDependencyIndex() (scanner.DependencyIndex, error) {
 	idx := make(scanner.DependencyIndex)
 
 	// Parse main dependencies
-	if deps, ok := pyproject["tool"].(map[string]interface{})["poetry"].(map[string]interface{})["dependencies"].(map[string]interface{}); ok {
-		for name := range deps {
-			if name == "python" {
-				continue
-			}
-			idx[name] = scanner.DependencyInfo{Direct: true, Type: "main"}
+	for name := range deps {
+		if name == "python" {
+			continue
 		}
+		idx[name] = scanner.DependencyInfo{Direct: true, Type: "main"}
 	}
 
 	// Parse dev dependencies
-	if deps, ok := pyproject["tool"].(map[string]interface{})["poetry"].(map[string]interface{})["dev-dependencies"].(map[string]interface{}); ok {
-		for name := range deps {
-			idx[name] = scanner.DependencyInfo{Direct: true, Type: "dev"}
-		}
+	for name := range devDeps {
+		idx[name] = scanner.DependencyInfo{Direct: true, Type: "dev"}
 	}
 
 	return idx, nil
 }
 
-// readPyprojectToml reads and parses pyproject.toml.
-// This is a simplified implementation; in production, use a TOML parser library.
-func (s *Scanner) readPyprojectToml() (map[string]interface{}, error) {
+// readPyprojectToml reads and parses pyproject.toml dependencies.
+// This is a simplified TOML parser that only extracts dependency names.
+func (s *Scanner) readPyprojectToml() (deps map[string]bool, devDeps map[string]bool, err error) {
 	path := filepath.Join(s.workDir, "pyproject.toml")
-	_, err := os.Stat(path)
+	file, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	defer file.Close()
+
+	deps = make(map[string]bool)
+	devDeps = make(map[string]bool)
+
+	scanner := bufio.NewScanner(file)
+	var inDependencies, inDevDependencies bool
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+
+		// Check for section headers
+		if strings.HasPrefix(line, "[tool.poetry.dependencies]") {
+			inDependencies = true
+			inDevDependencies = false
+			continue
+		} else if strings.HasPrefix(line, "[tool.poetry.dev-dependencies]") || strings.HasPrefix(line, "[tool.poetry.group.dev.dependencies]") {
+			inDevDependencies = true
+			inDependencies = false
+			continue
+		} else if strings.HasPrefix(line, "[") {
+			// New section started
+			inDependencies = false
+			inDevDependencies = false
+			continue
+		}
+
+		// Skip empty lines and comments
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		// Parse dependency line (format: package = "version")
+		if inDependencies || inDevDependencies {
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				pkgName := strings.TrimSpace(parts[0])
+				if inDependencies {
+					deps[pkgName] = true
+				} else {
+					devDeps[pkgName] = true
+				}
+			}
+		}
 	}
 
-	// In production, use github.com/pelletier/go-toml or similar
-	// For simplicity, return empty map
-	return make(map[string]interface{}), nil
+	if err := scanner.Err(); err != nil {
+		return nil, nil, err
+	}
+
+	return deps, devDeps, nil
 }
