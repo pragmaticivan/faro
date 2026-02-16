@@ -58,7 +58,7 @@ func TestGetUpdates(t *testing.T) {
 		},
 	}
 
-	// Test Case 1: Default options (exclude dev dependencies, include transitive)
+	// Test Case 1: Default options (include direct dev dependencies, exclude transitive)
 	opts := scanner.Options{
 		IncludeAll: false,
 	}
@@ -68,13 +68,14 @@ func TestGetUpdates(t *testing.T) {
 		t.Fatalf("GetUpdates failed: %v", err)
 	}
 
-	// Should have react, axios, and @types/node (transitive), but NOT vitest (dev)
+	// Should have react, axios, and vitest (direct dev), but NOT @types/node (transitive)
 	if len(modules) != 3 {
 		t.Errorf("expected 3 modules, got %d", len(modules))
 	}
 
 	foundReact := false
 	foundAxios := false
+	foundVitest := false
 	for _, m := range modules {
 		if m.Name == "react" {
 			foundReact = true
@@ -98,16 +99,16 @@ func TestGetUpdates(t *testing.T) {
 			}
 		}
 		if m.Name == "vitest" {
-			t.Error("vitest should not be included when IncludeAll=false")
+			foundVitest = true
+			if !m.Direct {
+				t.Error("expected vitest to be Direct=true")
+			}
+			if m.DependencyType != "devDependencies" {
+				t.Errorf("expected dependency type 'devDependencies', got %s", m.DependencyType)
+			}
 		}
 		if m.Name == "@types/node" {
-			// @types/node is transitive and should be included
-			if m.Direct {
-				t.Error("expected @types/node to be Direct=false")
-			}
-			if m.DependencyType != "transitive" {
-				t.Errorf("expected dependency type 'transitive', got %s", m.DependencyType)
-			}
+			t.Error("@types/node should not be included when IncludeAll=false")
 		}
 	}
 
@@ -116,6 +117,9 @@ func TestGetUpdates(t *testing.T) {
 	}
 	if !foundAxios {
 		t.Error("axios not found")
+	}
+	if !foundVitest {
+		t.Error("vitest not found")
 	}
 
 	// Test Case 2: IncludeAll = true
@@ -130,7 +134,7 @@ func TestGetUpdates(t *testing.T) {
 	}
 
 	// Verify vitest is included with correct type
-	foundVitest := false
+	foundVitest = false
 	for _, m := range modules {
 		if m.Name == "vitest" {
 			foundVitest = true
@@ -223,6 +227,51 @@ func TestGetUpdates_EmptyOutdated(t *testing.T) {
 
 	if len(modules) != 0 {
 		t.Errorf("expected 0 modules, got %d", len(modules))
+	}
+}
+
+func TestGetUpdates_ArrayOutputFormat(t *testing.T) {
+	tmpDir := t.TempDir()
+	mockPkgJSON := packageJSON{
+		DevDependencies: map[string]string{
+			"@nestjs/common": "^11.1.9",
+		},
+	}
+	pkgJSONBytes, _ := json.Marshal(mockPkgJSON)
+	if err := os.WriteFile(filepath.Join(tmpDir, "package.json"), pkgJSONBytes, 0644); err != nil {
+		t.Fatalf("failed to write package.json: %v", err)
+	}
+
+	mockOutdated := []pnpmOutdatedEntry{
+		{
+			Name:    "@nestjs/common",
+			Current: "11.1.9",
+			Latest:  "11.1.13",
+			Wanted:  "11.1.13",
+		},
+	}
+	outdatedBytes, _ := json.Marshal(mockOutdated)
+
+	s := &Scanner{
+		workDir: tmpDir,
+		runPnpmOutdated: func() ([]byte, error) {
+			return outdatedBytes, nil
+		},
+	}
+
+	modules, err := s.GetUpdates(scanner.Options{IncludeAll: false})
+	if err != nil {
+		t.Fatalf("GetUpdates failed: %v", err)
+	}
+
+	if len(modules) != 1 {
+		t.Fatalf("expected 1 module, got %d", len(modules))
+	}
+	if modules[0].Name != "@nestjs/common" {
+		t.Fatalf("expected @nestjs/common, got %s", modules[0].Name)
+	}
+	if modules[0].DependencyType != "devDependencies" {
+		t.Fatalf("expected devDependencies, got %s", modules[0].DependencyType)
 	}
 }
 

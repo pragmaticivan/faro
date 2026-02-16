@@ -2,6 +2,7 @@
 package yarn
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -36,10 +37,35 @@ func NewScanner(workDir string) *Scanner {
 		runYarnOutdated: func() ([]byte, error) {
 			cmd := exec.Command("yarn", "outdated", "--json")
 			cmd.Dir = workDir
-			out, _ := cmd.Output() // yarn outdated may return non-zero
+			var stderr bytes.Buffer
+			cmd.Stderr = &stderr
+
+			out, err := cmd.Output() // yarn outdated may return non-zero when updates are available
+			if err != nil {
+				if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+					if looksLikeJSON(out) {
+						return out, nil
+					}
+				}
+				if len(strings.TrimSpace(string(out))) > 0 {
+					return nil, fmt.Errorf("yarn outdated failed: %w, output: %s", err, strings.TrimSpace(string(out)))
+				}
+				if stderr.Len() > 0 {
+					return nil, fmt.Errorf("yarn outdated failed: %w, stderr: %s", err, stderr.String())
+				}
+				return nil, err
+			}
 			return out, nil
 		},
 	}
+}
+
+func looksLikeJSON(b []byte) bool {
+	s := strings.TrimSpace(string(b))
+	if s == "" {
+		return false
+	}
+	return strings.HasPrefix(s, "{") || strings.HasPrefix(s, "[")
 }
 
 // GetUpdates returns all yarn packages that have available updates.
@@ -88,10 +114,6 @@ func (s *Scanner) GetUpdates(opts scanner.Options) ([]scanner.Module, error) {
 					depType = "devDependencies"
 				} else if !isDirect {
 					depType = "transitive"
-				}
-
-				if !opts.IncludeAll && depType == "devDependencies" {
-					continue
 				}
 
 				if !opts.IncludeAll && depType == "transitive" {

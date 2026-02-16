@@ -49,7 +49,7 @@ func TestGetUpdates(t *testing.T) {
 		},
 	}
 
-	// Test Case 1: Default options (exclude dev dependencies)
+	// Test Case 1: Default options (include direct dev dependencies, exclude transitive)
 	opts := scanner.Options{
 		IncludeAll: false,
 	}
@@ -59,13 +59,14 @@ func TestGetUpdates(t *testing.T) {
 		t.Fatalf("GetUpdates failed: %v", err)
 	}
 
-	// Should have react and axios, but NOT jest or @types/node
-	if len(modules) != 2 {
-		t.Errorf("expected 2 modules, got %d", len(modules))
+	// Should have react, axios, and jest, but NOT @types/node
+	if len(modules) != 3 {
+		t.Errorf("expected 3 modules, got %d", len(modules))
 	}
 
 	foundReact := false
 	foundAxios := false
+	foundJest := false
 	for _, m := range modules {
 		if m.Name == "react" {
 			foundReact = true
@@ -89,7 +90,13 @@ func TestGetUpdates(t *testing.T) {
 			}
 		}
 		if m.Name == "jest" {
-			t.Error("jest should not be included when IncludeAll=false")
+			foundJest = true
+			if !m.Direct {
+				t.Error("expected jest to be Direct=true")
+			}
+			if m.DependencyType != "devDependencies" {
+				t.Errorf("expected dependency type 'devDependencies', got %s", m.DependencyType)
+			}
 		}
 		if m.Name == "@types/node" {
 			t.Error("@types/node should not be included (transitive)")
@@ -101,6 +108,9 @@ func TestGetUpdates(t *testing.T) {
 	}
 	if !foundAxios {
 		t.Error("axios not found")
+	}
+	if !foundJest {
+		t.Error("jest not found")
 	}
 
 	// Test Case 2: IncludeAll = true
@@ -115,7 +125,7 @@ func TestGetUpdates(t *testing.T) {
 	}
 
 	// Verify jest is included with correct type
-	foundJest := false
+	foundJest = false
 	for _, m := range modules {
 		if m.Name == "jest" {
 			foundJest = true
