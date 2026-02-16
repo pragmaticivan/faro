@@ -53,16 +53,27 @@ func (s *Scanner) GetUpdates(opts scanner.Options) ([]scanner.Module, error) {
 		}
 
 		// Parse line: "package-name (!) current latest [description]"
-		// The (!) indicator is present for all outdated packages
+		// OR: "package-name current latest [description]"
+		// The (!) indicator may or may not be present
 		fields := strings.Fields(line)
-		if len(fields) < 4 {
+		if len(fields) < 3 {
 			continue
 		}
 
 		name := fields[0]
-		// Skip the (!) indicator
-		current := fields[2]
-		latest := fields[3]
+		var current, latest string
+
+		// Check if second field is the (!) indicator
+		if fields[1] == "(!)" {
+			if len(fields) < 4 {
+				continue
+			}
+			current = fields[2]
+			latest = fields[3]
+		} else {
+			current = fields[1]
+			latest = fields[2]
+		}
 
 		depInfo, isDirect := depIdx[name]
 		if !isDirect {
@@ -132,7 +143,7 @@ func (s *Scanner) readPyprojectToml() (deps map[string]bool, devDeps map[string]
 	if err != nil {
 		return nil, nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	deps = make(map[string]bool)
 	devDeps = make(map[string]bool)

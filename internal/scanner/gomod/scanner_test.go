@@ -61,12 +61,6 @@ require (
 		},
 	}
 
-	listOutput := []byte{}
-	for _, m := range mockOutput {
-		b, _ := json.Marshal(m)
-		listOutput = append(listOutput, b...)
-	}
-
 	// 3. Initialize Scanner
 	s := NewScanner(tmpDir)
 	s.listAllModules = func() ([]byte, error) {

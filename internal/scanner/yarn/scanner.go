@@ -94,6 +94,10 @@ func (s *Scanner) GetUpdates(opts scanner.Options) ([]scanner.Module, error) {
 					continue
 				}
 
+				if !opts.IncludeAll && depType == "transitive" {
+					continue
+				}
+
 				if opts.Filter != "" && !strings.Contains(name, opts.Filter) {
 					continue
 				}

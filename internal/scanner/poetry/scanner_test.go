@@ -35,7 +35,7 @@ pytest   7.0.0  7.4.0  Testing framework
 
 	s := &Scanner{
 		workDir: tmpDir,
-		runPoetryCmd: func(args ...string) ([]byte, error) {
+		runPoetryCmd: func(_ ...string) ([]byte, error) {
 			return []byte(mockOutput), nil
 		},
 	}
@@ -139,7 +139,7 @@ flask  2.2.0 3.0.0 Web framework
 
 	s := &Scanner{
 		workDir: tmpDir,
-		runPoetryCmd: func(args ...string) ([]byte, error) {
+		runPoetryCmd: func(_ ...string) ([]byte, error) {
 			return []byte(mockOutput), nil
 		},
 	}
@@ -176,7 +176,7 @@ requests = "^2.31.0"
 
 	s := &Scanner{
 		workDir: tmpDir,
-		runPoetryCmd: func(args ...string) ([]byte, error) {
+		runPoetryCmd: func(_ ...string) ([]byte, error) {
 			// Simulate error when no outdated packages
 			return []byte{}, nil
 		},
