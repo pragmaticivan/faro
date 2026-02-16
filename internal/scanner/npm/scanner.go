@@ -2,6 +2,7 @@
 package npm
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -46,9 +47,24 @@ func NewScanner(workDir string) *Scanner {
 		runNpmOutdated: func() ([]byte, error) {
 			cmd := exec.Command("npm", "outdated", "--json")
 			cmd.Dir = workDir
-			// npm outdated returns exit code 1 when there are outdated packages
-			// So we ignore the error and just get the output
-			out, _ := cmd.Output()
+			var stderr bytes.Buffer
+			cmd.Stderr = &stderr
+
+			// npm outdated returns exit code 1 when there are outdated packages.
+			// However, if the command fails for other reasons (e.g. executable not found),
+			// we should return the error.
+			out, err := cmd.Output()
+			if err != nil {
+				// If exit code is 1, it just means there are outdated packages, which is expected.
+				if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+					return out, nil
+				}
+				// For other errors, return error with stderr info
+				if stderr.Len() > 0 {
+					return nil, fmt.Errorf("npm outdated failed: %w, stderr: %s", err, stderr.String())
+				}
+				return nil, err
+			}
 			return out, nil
 		},
 	}
@@ -128,8 +144,8 @@ func (s *Scanner) GetUpdates(opts scanner.Options) ([]scanner.Module, error) {
 			}
 		}
 
-		// Filter devDependencies if not including all
-		if !opts.IncludeAll && depType == "devDependencies" {
+		// Filter transitive if not including all
+		if !opts.IncludeAll && depType == "transitive" {
 			continue
 		}
 

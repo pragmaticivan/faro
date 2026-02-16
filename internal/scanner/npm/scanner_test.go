@@ -195,3 +195,44 @@ func TestParseNpmViewTime(t *testing.T) {
 		t.Errorf("expected 2026-01-22T10:01:38.294Z, got %s", val)
 	}
 }
+
+func TestGetUpdates_IncludeScopedDevDependenciesWhenTypeMissing(t *testing.T) {
+	mockPkgJSON := packageJSON{
+		DevDependencies: map[string]string{
+			"@nestjs/common": "^11.1.9",
+		},
+	}
+	pkgJSONBytes, _ := json.Marshal(mockPkgJSON)
+
+	mockOutdated := npmOutdated{
+		"@nestjs/common": {Current: "11.1.9", Latest: "11.1.13", Type: ""},
+	}
+	outdatedBytes, _ := json.Marshal(mockOutdated)
+
+	s := &Scanner{
+		runNpmOutdated: func() ([]byte, error) {
+			return outdatedBytes, nil
+		},
+		fetchPackageTime: func(name, version string) (string, error) {
+			return "", nil
+		},
+	}
+
+	tmpDir := t.TempDir()
+	s.workDir = tmpDir
+	if err := writePackageJSON(tmpDir, pkgJSONBytes); err != nil {
+		t.Fatalf("failed to write package.json: %v", err)
+	}
+
+	modules, err := s.GetUpdates(scanner.Options{IncludeAll: false})
+	if err != nil {
+		t.Fatalf("GetUpdates failed: %v", err)
+	}
+
+	if len(modules) != 1 {
+		t.Fatalf("expected 1 module, got %d", len(modules))
+	}
+	if modules[0].Name != "@nestjs/common" {
+		t.Fatalf("expected @nestjs/common, got %s", modules[0].Name)
+	}
+}
